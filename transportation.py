@@ -194,3 +194,25 @@ def des_trans(costs, surp, lack, batch = 20):
     K = len(surp[0])
 
     return np.zeros((N,N,K))
+
+def intra_alloc(sale_rate, storage, period = 2, min_depth = 3):
+    # sale_rate: (N,); storage: (N,)
+    N = len(sale_rate)
+    sale_rate = sale_rate.reshape((N,))
+    storage = sale_rate.reshape((N,))
+
+    depth = storage / (sale_rate + 0.01 * np.array(sale_rate == 0).astype(int))
+    shorts = min_depth * sale_rate - storage
+    shorts = shorts * np.array(shorts > 0).astype(int)
+    runds = 2 * period * sale_rate - storage
+    runds = runds * np.array(runds > 0).astype(int)
+
+    x_trans = muti_trans(np.zeros((N,N)), runds.reshape((N,1)), shorts.reshape((N,1)))
+    x_trans = np.sum(x_trans, axis=2)
+    # the (N+1)th means the warehouse
+    result_x = np.zeros((N+1,N))
+    result_x[0:N,:] = x_trans
+
+    result_x[N,:] = (runds - np.sum(x_trans, axis=0)).reshape((1,N))
+
+    return result_x
