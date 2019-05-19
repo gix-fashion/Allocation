@@ -81,6 +81,10 @@ def muti_trans(costs, surp, lack):
 
     return {'objective':obj, 'var': X}
 
+def bag_trans(surp, lack, bags):
+    N = len(surp) # number of total area
+    K = len(surp[0]) # type number of total cloth
+
 def updata_costs(costs, batch, x_edge, stair, p1 = 5, p2 = 1):
     if stair == 0:
         bags = np.ceil(x_edge / batch)
@@ -98,19 +102,14 @@ def iter_trans(costs, surp, lack, batch = 20, stair = 0):
     # the solution of last iteration
     X_last = np.zeros((N,N,K))
     costs_update = costs / batch
+    res = muti_trans(costs_update, surp, lack)
+    X_last = res['var']
+    '''
     obj_last = np.sum(costs_edge)
 
     iter_num = 0
 
     while 1:
-        '''
-        surp_inc = surp - np.sum(X_last, axis=1).reshape(N,K)
-        lack_inc = lack - np.sum(X_last, axis=0).reshape(N,K)
-        # solve each subproblem for every type
-        res = muti_trans(costs_update, surp_inc, lack_inc)
-        X_inc = res['var']
-        X = X_inc + X_last
-        '''
         res = muti_trans(costs_update, surp, lack)
         X = res['var']
         
@@ -129,7 +128,7 @@ def iter_trans(costs, surp, lack, batch = 20, stair = 0):
 
         # update the costs of linear model
         costs_update = updata_costs(costs, batch, x_edge, stair)
-
+    '''
     return X_last
 
 def intp_trans(costs, surp, lack, batch = 20):
@@ -195,6 +194,89 @@ def des_trans(costs, surp, lack, batch = 20):
 
     return np.zeros((N,N,K))
 
+def PSO_trans(costs, surp, lack, batch = 20):
+    psize = 50 
+    iters = 100
+    w = 0.6
+    vmax = 5
+    c1 = 2
+    c2 = 2
+
+    N = len(costs) # number of total area
+    K = len(surp[0]) # type number of total cloth
+
+    costs_update = costs / batch
+    res = muti_trans(costs_update, surp, lack)
+    X_init = res['var']
+
+    # initialize particles
+    particles = []
+    vels = []
+    fits = np.zeros((psize,))
+    n_id = [i for i in range(N)]
+    for i in range(psize):
+        vel = (np.random.rand(N,N,K) - 0.5) * 2 * v_max * (i > 0)
+        '''
+        x_rand = X_init
+        penalty = 0
+        for k in range(K):
+            vel[n_id,n_id,k] = 0
+            vel_s = np.sum(vel[:,:,k], axis=0)
+            vel[:,:,k] -= np.repeat(vel_s.reshape(1,N), N, axis=0) / (N-1)
+            vel[n_id,n_id,k] = 0
+            x_rand[:,:,k] += vel[:,:,k]
+            s_rand = surp[:,k] - np.sum(x_rand[:,:,k], axis=1)
+            if np.min(s_rand) < 0 or np.min(x_rand[:,:,k]) < 0:
+                penalty += 1000000
+        '''
+        vel[n_id,n_id,:] = 0
+        vel_s = np.sum(vel[:,:,k],axis=0).reshape((1,N,K))
+        vel -= np.repeat(vel_s, N, axis=0) / (N - 1)
+        vel[n_id,n_id,:] = 0
+        x_rand = X_init + vel
+        s_rand = surp - np.sum(x_rand, axis=1)
+        penalty = np.max(np.max(np.array(s_rand < 0).astype(int), axis=0)
+         + np.max(np.array(x_rand < 0).astype(int), axis=(0,1))) * 100000.0
+        particles.append(x_rand)
+        vels.append(vel)
+        y_rand = np.sum(x_rand, axis=2)
+        fits[i] = np.sum(np.ceil(y_rand / batch) * costs) + penalty
+
+    pbest_f = fits
+    pbest = particles
+    gbest_f = np.min(pbest_f)
+    i = np.where(pbest_f == gbest_f)[0][0]
+    gbest = particles[i]
+
+    iter_num = 0
+    while iter_num < iters:
+        for i in range(psize):
+            vels[i] = (w * vels[i] + c1 * random.random() * (pbest[i] - particles[i])
+             + c2 * random.random() * (gbest - particles[i]))
+            particles[i] += vels[i]
+            xi = particles[i]
+
+            s_rand = surp - np.sum(xi, axis=1)
+            penalty = np.max(np.max(np.array(s_rand < 0).astype(int), axis=0)
+            + np.max(np.array(xi < 0).astype(int), axis=(0,1))) * 100000.0
+            '''
+            penalty = 0
+            for k in range(K):
+                s_rand = surp[:,k] - np.sum(xi[:,:,k], axis=1)
+                if np.min(s_rand) < 0 or np.min(xi[:,:,k]) < 0:
+                    penalty += 1000000
+            '''
+            y_rand = np.sum(xi, axis=2)
+            fits[i] = np.sum(np.ceil(y_rand / batch) * costs) + penalty
+            if fits[i] < pbest_f[i]:
+                pbest_f[i] = fits[i]
+                pbest[i] = particles[i]
+                if fits[i] < gbest_f:
+                    gbest_f = fits[i]
+                    gbest = particles[i]
+
+    return gbest
+
 def intra_alloc(sale_rate, storage, period = 2, min_depth = 3):
     # sale_rate: (N,); storage: (N,)
     N = len(sale_rate)
@@ -216,3 +298,6 @@ def intra_alloc(sale_rate, storage, period = 2, min_depth = 3):
     result_x[N,:] = (runds - np.sum(x_trans, axis=0)).reshape((1,N))
 
     return result_x
+
+
+    

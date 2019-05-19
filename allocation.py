@@ -34,6 +34,8 @@ if __name__=="__main__":
         result = tp.iter_trans(costs, surplus, lacks)
     elif sys.argv[6] == 1:
         result = tp.intp_trans(costs, surplus, lacks)
+    elif sys.argv[6] == 2:
+        result = tp.PSO_trans(costs, surplus, lacks)
     
     N = len(sale_pd)
     K = len(sale_pd[0])
