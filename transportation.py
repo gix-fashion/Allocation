@@ -3,6 +3,15 @@ import numpy as np
 import math
 import random
 
+def pairwise(iterable):
+    '''
+    Given an iterable, yield the items in it in pairs. For instance:
+    
+        list(pairwise([1,2,3,4])) == [(1,2), (3,4)]
+    '''
+    x = iter(iterable)
+    return zip(x, x)
+
 def trans(costs, x_max, y_max):
 
     row = len(costs)
@@ -100,7 +109,7 @@ def bag_trans(surp, lack, bags):
     
     for k in Types:
         for i in Rows:
-            prob += lpSum([X_ijk[i][j][k] for j in Cols]) <= surplus[i][k]
+            prob += lpSum([X_ijk[i][j][k] for j in Cols]) <= surp[i][k]
 
         for j in Cols:
             prob += lpSum([X_ijk[i][j][k] for i in Rows]) == lack[j][k]
@@ -112,9 +121,10 @@ def bag_trans(surp, lack, bags):
     prob.solve()
 
     if LpStatus[prob.status] != 'Optimal':
-        print("Status:", LpStatus[prob.status])
+        # print("Status:", LpStatus[prob.status])
         return (False,0)
     else:
+        # print("valid")
         return (True,[[[X_ijk[i][j][k] for k in Types] for j in Cols] for i in Rows])
 
 def updata_costs(costs, batch, x_edge, stair, p1 = 5, p2 = 1):
@@ -125,22 +135,27 @@ def updata_costs(costs, batch, x_edge, stair, p1 = 5, p2 = 1):
         top = np.array(margin > batch - p1).astype(int)
         costs_new = costs * ((1 - np.exp((margin - p1) * bottom)) + 
         (1 - np.exp((batch - margin - p1) * top)))
+    elif stair == 1:
+        pen_edge = np.array(x_edge < p1).astype(int)
+        zo_edge = np.array(x_edge <= 1.1).astype(int)
+        costs_new = costs / batch + costs / (x_edge + 0.001) * pen_edge
     return costs_new
 
-def iter_trans(costs, surp, lack, batch = 20, stair = 0):
+def iter_trans(costs, surp, lack, batch = 200, stair = 1):
     N = len(costs) # number of total area
     K = len(surp[0]) # type number of total cloth
 
     # the solution of last iteration
     X_last = np.zeros((N,N,K))
     costs_update = costs / batch
+    '''
     res = muti_trans(costs_update, surp, lack)
     X_last = res['var']
     y_rand = np.sum(X_last, axis=2)
     obj = np.sum(np.ceil(y_rand / batch) * costs)
     print(obj)
     '''
-    obj_last = np.sum(costs_edge)
+    obj_last = np.sum(costs)
 
     iter_num = 0
 
@@ -151,7 +166,9 @@ def iter_trans(costs, surp, lack, batch = 20, stair = 0):
         # total traffic volume of all type of goods
         # in each edge
         x_edge = np.sum(X, axis=2)
-        obj = np.sum(np.ceil(x_edge / batch) * costs)
+        obj = np.sum(np.array(x_edge > 0).astype(int) * costs)
+        bags = np.sum(np.array(x_edge > 0).astype(int))
+        print('obj:' + str(obj) + ", bags: " + str(bags))
 
         if abs(obj - obj_last) < 0.0001 or iter_num > 100:
             print(obj - obj_last)
@@ -163,7 +180,7 @@ def iter_trans(costs, surp, lack, batch = 20, stair = 0):
 
         # update the costs of linear model
         costs_update = updata_costs(costs, batch, x_edge, stair)
-    '''
+    
     return X_last
 
 def intp_trans(costs, surp, lack, batch = 20):
@@ -231,12 +248,14 @@ def des_trans(costs, surp, lack, batch = 20):
     return np.zeros((N,N,K))
 
 def PSO_trans(costs, surp, lack, batch = 20):
-    psize = 500 
+    psize = 100 # particle swarm size
     iters = 50
     w = 0.6
-    vmax = 2
+    vmax = 5
     c1 = 2
     c2 = 2
+    pc1 = 1
+    pc2 = 1
 
     N = len(costs) # number of total area
     K = len(surp[0]) # type number of total cloth
@@ -244,88 +263,69 @@ def PSO_trans(costs, surp, lack, batch = 20):
     costs_update = costs / batch
     res = muti_trans(costs_update, surp, lack)
     X_init = res['var']
-
-    sr = surp - np.sum(X_init, axis=1)
-    print(np.min(sr))
+    y_init = np.sum(X_init, axis=2)
+    s_init = surp - np.sum(X_init, axis=1)
+    l_init = lack - np.sum(X_init, axis=0)
+    fit = np.array(y_init > 0).astype(int) * costs + (pc1 * np.sum(np.array(s_init < 0).astype(int)
+    * (-s_init)) + pc2 * np.sum(np.abs(l_init)))
 
     # initialize particles
     particles = []
-    vels = []
-    fits = np.zeros((psize,))
+    particles.append((fit, X_init, np.zeros((N,N,K))))
     n_id = [i for i in range(N)]
-    r_num = 0
-    for i in range(psize):
-        vel = (np.random.rand(N,N,K) - 0.5) * 2 * vmax * (i > 0)
-        '''
-        x_rand = X_init
-        penalty = 0
-        for k in range(K):
-            vel[n_id,n_id,k] = 0
-            vel_s = np.sum(vel[:,:,k], axis=0)
-            vel[:,:,k] -= np.repeat(vel_s.reshape(1,N), N, axis=0) / (N-1)
-            vel[n_id,n_id,k] = 0
-            x_rand[:,:,k] += vel[:,:,k]
-            s_rand = surp[:,k] - np.sum(x_rand[:,:,k], axis=1)
-            if np.min(s_rand) < 0 or np.min(x_rand[:,:,k]) < 0:
-                penalty += 1000000
-        '''
-        vel[n_id,n_id,:] = 0
-        vel_s = np.sum(vel,axis=0).reshape((1,N,K))
-        vel -= np.repeat(vel_s, N, axis=0) / (N - 1)
-        vel[n_id,n_id,:] = 0
+    
+    for i in range(psize-1):
+        vel = (np.random.rand(N,N,K) - 0.5) * 2 * vmax
         x_rand = X_init + vel
+        x_rand[n_id,n_id,:] = 0
+        x_rand = x_rand * np.array(x_rand > 0).astype(int)
         s_rand = surp - np.sum(x_rand, axis=1)
-        penalty = np.max(np.max(np.array(s_rand < -0.0001).astype(int), axis=0)
-         + np.max(np.array(x_rand < -0.0001).astype(int), axis=(0,1))) * 100000.0
+        l_rand = lack - np.sum(x_rand, axis=0)
+        penalty = (pc1 * np.sum(np.array(s_rand < 0).astype(int)
+        * (-s_rand)) + pc2 * np.sum(np.abs(l_rand)))
         
-        particles.append(x_rand)
-        vels.append(vel)
         y_rand = np.sum(x_rand, axis=2)
-        fits[i] = np.sum(np.ceil(y_rand / batch) * costs) + penalty
+        fits[i] = np.array(y_rand > 0).astype(int) * costs + penalty
+        particles.append((fit, x_rand, vel))
 
-    print(r_num)
-    pbest_f = fits
     pbest = particles
-    gbest_f = np.min(pbest_f)
-    i = np.where(pbest_f == gbest_f)[0][0]
-    gbest = particles[i]
+    gbest = np.min(pbest_f)
 
     iter_num = 0
     while iter_num < iters:
-        r_num = 0
         for i in range(psize):
-            vels[i] = (w * vels[i] + c1 * random.random() * (pbest[i] - particles[i])
-             + c2 * random.random() * (gbest - particles[i]))
-            particles[i] += vels[i]
-            xi = particles[i]
+            vel = particles[i][2]
+            xi = particles[i][1]
+            vel = (w * vel + c1 * random.random() * (pbest[i][1] - xi)
+             + c2 * random.random() * (gbest[1] - xi))
+            xi += vel
+            xi[n_id,n_id,:] = 0
+            xi = xi * np.array(xi > 0).astype(int)
 
             s_rand = surp - np.sum(xi, axis=1)
-            penalty = np.max(np.max(np.array(s_rand < 0).astype(int), axis=0)
-            + np.max(np.array(xi < 0).astype(int), axis=(0,1))) * 100000.0
-            '''
-            penalty = 0
-            for k in range(K):
-                s_rand = surp[:,k] - np.sum(xi[:,:,k], axis=1)
-                if np.min(s_rand) < 0 or np.min(xi[:,:,k]) < 0:
-                    penalty += 1000000
-            '''
-            if penalty == 0:
-                r_num += 1
+            l_rand = lack - np.sum(xi, axis=0)
+            (pc1 * np.sum(np.array(s_rand < 0).astype(int)
+            * (-s_rand)) + pc2 * np.sum(np.abs(l_rand)))
+            
             y_rand = np.sum(xi, axis=2)
-            fits[i] = np.sum(np.ceil(y_rand / batch) * costs) + penalty
-            if fits[i] < pbest_f[i]:
-                pbest_f[i] = fits[i]
+            fit = np.array(y_rand > 0).astype(int) * costs + penalty
+            particles[i] = (fit, xi, vel)
+            if fit < pbest[i][0]:
                 pbest[i] = particles[i]
-                if fits[i] < gbest_f:
-                    gbest_f = fits[i]
+                if fit < gbest[0]:
                     gbest = particles[i]
-        print(gbest_f)
+        print(gbest[0])
 
-    return gbest
+    return gbest[1]
 
-def GA_parents(dnas, parents_num, tournament_size=2):
+def GA_parents(dnas, parents_num, tournament_size=5):
     for i in range(parents_num):
         yield min(random.sample(dnas, tournament_size))
+
+def GA_selection(dnas, parents_num):
+    psize = len(dnas)
+    for i in range(parents_num):
+        yield dnas[min(int(-10 * math.log(1 - random.random())),psize-1)]
 
 def GA_mute(dna_array, N, mrate):
     mute_rnum = np.random.rand(N,N)
@@ -335,11 +335,11 @@ def GA_mute(dna_array, N, mrate):
     result = result * np.array(result > 0).astype(int)
     return result
 
-def GA_trans(costs, surp, lack, batch = 20, psize = 100):
+def GA_trans(costs, surp, lack, batch = 20, psize = 50):
     # params of GA
-    mutation_rate = 0.05
+    mutation_rate = 0.1
     elite_size = 2
-    init_var = 3
+    init_var = 2
     max_iters = 100
 
     N = len(costs) # number of total area
@@ -355,30 +355,34 @@ def GA_trans(costs, surp, lack, batch = 20, psize = 100):
     y_init = np.ceil(np.sum(X_init, axis=2) / batch)
     dnas.append(y_init)
     fits.append(np.sum(y_init * costs))
+    print(np.sum(y_init * costs))
+    total_edge = len(np.where(y_init > 0)[0])
+    init_rate = total_edge / (N * N)
 
     n_id = [i for i in range(N)]
     array_pos = np.array([[i * N + j for j in range(N)] for i in range(N)])
     r_num = 0
     
     for i in range(psize-1):
-        delta = np.random.randint(low=-init_var, high=init_var+1, size=(N,N))
-        dna = y_init + delta
+        delta = np.random.rand(N,N)
+        dna = y_init + (np.array(delta < 0.1 * init_rate).astype(int)
+        - np.array(y_init > 0).astype(int) * np.array(delta < 0.05).astype(int))
         dna[n_id,n_id] = 0
-        dna = dna * np.array(dna > 0).astype(int)
         # test if the dna is valid
         bags = dna * batch
         is_valid = bag_trans(surp, lack, bags)[0]
         if is_valid:
             penalty = 0
+            print(np.sum(dna * costs))
             r_num += 1
         else:
-            penalty = 20 * np.sum(costs)
+            penalty = np.sum(costs)
         
         dnas.append(dna)
         fits.append(np.sum(dna * costs) + penalty)
 
     best_fit = min(fits)
-    print("best_fit: " + best_fit + ", r_num: " + r_num)
+    print("best_fit: " + str(best_fit) + ", r_num: " + str(r_num))
 
     scored_dnas = [(fits[i], dnas[i]) for i in range(psize)]
     iter_num = 0
@@ -388,7 +392,8 @@ def GA_trans(costs, surp, lack, batch = 20, psize = 100):
         sorted_dnas = sorted(scored_dnas, key=lambda sdna: sdna[0])
         # elite elements
         scored_dnas = sorted_dnas[:elite_size]
-        for parent1, parent2 in pairwise(GA_parents(sorted_dnas, psize-elite_size)):
+        print(len(sorted_dnas))
+        for parent1, parent2 in pairwise(GA_selection(sorted_dnas, psize-elite_size)):
             # crossover parents
             point1, point2 = sorted(random.randint(0, N * N) for _ in range(2))
             mask = np.array(array_pos <= point1).astype(int) + np.array(
@@ -400,15 +405,17 @@ def GA_trans(costs, surp, lack, batch = 20, psize = 100):
             is_valid = bag_trans(surp, lack, child1 * batch)[0]
             if is_valid:
                 penalty = 0
+                print(np.sum(child1 * costs))
                 r_num += 1
             else:
-                penalty = 20 * np.sum(costs)
+                penalty = np.sum(costs)
             fit = np.sum(child1 * costs) + penalty
             scored_dnas.append((fit, child1))
             child2[n_id,n_id] = 0
             is_valid = bag_trans(surp, lack, child2 * batch)[0]
             if is_valid:
                 penalty = 0
+                print(np.sum(child2 * costs))
                 r_num += 1
             else:
                 penalty = 20 * np.sum(costs)
@@ -416,7 +423,8 @@ def GA_trans(costs, surp, lack, batch = 20, psize = 100):
             scored_dnas.append((fit, child2))
         
         best_dna = min(scored_dnas)
-        print("best_fit: " + best_dna[0] + ", r_num: " + r_num)
+        print("best_fit: " + str(best_dna[0]) + ", second: " +
+         str(scored_dnas[1][0]) + ", r_num: " + str(r_num))
     X = np.array(bag_trans(surp, lack, best_dna[1] * batch)[1])
     return X
 

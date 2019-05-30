@@ -17,15 +17,15 @@ def main(argv):
 
     # sale_pd, N * K, K is the number of cloth type
     data = pd.read_csv(argv[1], index_col=0)
-    sale_pd = data.values[:,0:10]
+    sale_pd = data.values
 
     # storage data, N * K
     data = pd.read_csv(argv[2], index_col=0)
-    storage = data.values[:,0:10]
+    storage = data.values
 
     # supplement data, N * K
     data = pd.read_csv(argv[3], index_col=0)
-    supp = data.values[:,0:10]
+    supp = data.values
 
     # compute the surplus and lacks
     total = storage + supp - sale_pd
@@ -33,13 +33,13 @@ def main(argv):
     lacks = - total * np.array(total < 0).astype(int)
 
     if argv[6] == '0':
-        result = tp.iter_trans(costs, surplus, lacks, batch = 4)
+        result = tp.iter_trans(costs, surplus, lacks, batch = 200)
     elif argv[6] == '1':
-        result = tp.intp_trans(costs, surplus, lacks, batch = 4)
+        result = tp.intp_trans(costs, surplus, lacks, batch = 200)
     elif argv[6] == '2':
-        result = tp.PSO_trans(costs, surplus, lacks, batch = 4)
+        result = tp.PSO_trans(costs, surplus, lacks, batch = 200)
     elif argv[6] == '3':
-        result = tp.GA_trans(costs, surplus, lacks, batch = 4)
+        result = tp.GA_trans(costs, surplus, lacks, batch = 200)
     
     N = len(sale_pd)
     K = len(sale_pd[0])
