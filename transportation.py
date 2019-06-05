@@ -15,6 +15,8 @@ def pairwise(iterable):
 def trans(costs, x_max, y_max):
 
     row = len(costs)
+    if row == 0:
+        return {'objective':0, 'var': []}
     col = len(costs[0])
     Rows = range(row)
     Cols = range(col)
@@ -53,6 +55,8 @@ def muti_trans(costs, surp, lack):
 
         index_l = np.where(l_k > 0)[0]
         index_s = np.where(s_k > 0)[0]
+        if len(index_l) == 0 or len(index_s) == 0:
+            continue
 
         # costs of k type
         costs_k = costs[index_s,:]
@@ -86,8 +90,8 @@ def muti_trans(costs, surp, lack):
 
         for li in range(len(index_l)):
             X[index_s,index_l[li],i] = x_k[:,li]
-        
-        obj += obj_k
+        if obj_k != None:
+            obj += obj_k
 
     return {'objective':obj, 'var': X}
 
@@ -138,7 +142,7 @@ def updata_costs(costs, batch, x_edge, stair, p1 = 5, p2 = 1):
     elif stair == 1:
         pen_edge = np.array(x_edge < p1).astype(int)
         zo_edge = np.array(x_edge <= 1.1).astype(int)
-        costs_new = costs / batch + costs / (x_edge + 0.001) * pen_edge
+        costs_new = costs + costs / (x_edge + 0.001) * pen_edge
     return costs_new
 
 def iter_trans(costs, surp, lack, batch = 200, stair = 1):
@@ -147,7 +151,7 @@ def iter_trans(costs, surp, lack, batch = 200, stair = 1):
 
     # the solution of last iteration
     X_last = np.zeros((N,N,K))
-    costs_update = costs / batch
+    costs_update = costs
     '''
     res = muti_trans(costs_update, surp, lack)
     X_last = res['var']
@@ -168,7 +172,8 @@ def iter_trans(costs, surp, lack, batch = 200, stair = 1):
         x_edge = np.sum(X, axis=2)
         obj = np.sum(np.array(x_edge > 0).astype(int) * costs)
         bags = np.sum(np.array(x_edge > 0).astype(int))
-        print('obj:' + str(obj) + ", bags: " + str(bags))
+        print('obj:' + str(obj) + ", bags: " + str(bags) + ", average: "
+        + str(np.sum(x_edge) / bags))
 
         if abs(obj - obj_last) < 0.0001 or iter_num > 100:
             print(obj - obj_last)
@@ -248,14 +253,14 @@ def des_trans(costs, surp, lack, batch = 20):
     return np.zeros((N,N,K))
 
 def PSO_trans(costs, surp, lack, batch = 20):
-    psize = 100 # particle swarm size
-    iters = 50
-    w = 0.6
-    vmax = 5
+    psize = 5000 # particle swarm size
+    iters = 500
+    w = 1
+    vmax = 0.5
     c1 = 2
     c2 = 2
-    pc1 = 1
-    pc2 = 1
+    pc1 = 0.1
+    pc2 = 0.1
 
     N = len(costs) # number of total area
     K = len(surp[0]) # type number of total cloth
@@ -266,33 +271,37 @@ def PSO_trans(costs, surp, lack, batch = 20):
     y_init = np.sum(X_init, axis=2)
     s_init = surp - np.sum(X_init, axis=1)
     l_init = lack - np.sum(X_init, axis=0)
-    fit = np.array(y_init > 0).astype(int) * costs + (pc1 * np.sum(np.array(s_init < 0).astype(int)
-    * (-s_init)) + pc2 * np.sum(np.abs(l_init)))
+    penalty = np.sum(pc1 * np.array(s_init < 0).astype(int) * np.exp(-s_init) +
+    pc2 * np.exp(np.abs(l_init)))
+    fit = np.sum(np.array(y_init > 0).astype(int) * costs) + penalty
 
     # initialize particles
     particles = []
     particles.append((fit, X_init, np.zeros((N,N,K))))
     n_id = [i for i in range(N)]
     
+    
     for i in range(psize-1):
         vel = (np.random.rand(N,N,K) - 0.5) * 2 * vmax
-        x_rand = X_init + vel
+        x_rand = X_init + (np.random.rand(N,N,K) - 0.5) * 2 * 2
         x_rand[n_id,n_id,:] = 0
         x_rand = x_rand * np.array(x_rand > 0).astype(int)
         s_rand = surp - np.sum(x_rand, axis=1)
         l_rand = lack - np.sum(x_rand, axis=0)
-        penalty = (pc1 * np.sum(np.array(s_rand < 0).astype(int)
-        * (-s_rand)) + pc2 * np.sum(np.abs(l_rand)))
+        penalty = np.sum(pc1 * np.array(s_rand < 0).astype(int) * np.exp(-s_rand) +
+        pc2 * np.exp(np.abs(l_rand)))
         
         y_rand = np.sum(x_rand, axis=2)
-        fits[i] = np.array(y_rand > 0).astype(int) * costs + penalty
+        fit = np.sum(np.array(y_rand > 0).astype(int) * costs) + penalty
         particles.append((fit, x_rand, vel))
 
     pbest = particles
-    gbest = np.min(pbest_f)
+    gbest = min(particles)
+    print(gbest[0])
 
     iter_num = 0
     while iter_num < iters:
+        iter_num += 1
         for i in range(psize):
             vel = particles[i][2]
             xi = particles[i][1]
@@ -304,17 +313,18 @@ def PSO_trans(costs, surp, lack, batch = 20):
 
             s_rand = surp - np.sum(xi, axis=1)
             l_rand = lack - np.sum(xi, axis=0)
-            (pc1 * np.sum(np.array(s_rand < 0).astype(int)
-            * (-s_rand)) + pc2 * np.sum(np.abs(l_rand)))
+            penalty = np.sum(pc1 * np.array(s_rand < 0).astype(int) * np.exp(-s_rand) +
+            pc2 * np.exp(np.abs(l_rand)))
             
             y_rand = np.sum(xi, axis=2)
-            fit = np.array(y_rand > 0).astype(int) * costs + penalty
+            fit = np.sum(np.array(y_rand > 0).astype(int) * costs) + penalty
             particles[i] = (fit, xi, vel)
             if fit < pbest[i][0]:
+                print(str(pbest[i][0]) + '->' + str(fit))
                 pbest[i] = particles[i]
                 if fit < gbest[0]:
                     gbest = particles[i]
-        print(gbest[0])
+                    print('gbest: ' + str(gbest[0]))
 
     return gbest[1]
 
