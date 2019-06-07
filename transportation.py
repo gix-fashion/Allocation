@@ -193,7 +193,7 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
         costs_update = costs_update * np.array(x_edge > 0).astype(int)
         max_cost = np.max(costs_update)
         max_edge = np.where(costs_update == max_cost)
-        anni_state[max_edge[0]][max_edge[1]] = 1
+        anni_state[max_edge[0][0]][max_edge[1][0]] = 1
 
         costs_update = updata_costs(costs, batch, x_edge, stair)
         costs_update = costs_update * (1 - anni_state)
@@ -212,6 +212,8 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
             print('obj_best: ' + str(obj_best))
 
         iter_num += 1
+        if np.sum(np.array(x_edge > 0).astype(int) * (1 - anni_state)) == 0:
+            break
 
     s2s_skc = np.sum(np.array(X > 0).astype(int), axis=1)
     invalid_num = np.sum(np.array(s2s_skc > 2).astype(int))
