@@ -131,7 +131,7 @@ def bag_trans(surp, lack, bags):
         # print("valid")
         return (True,[[[X_ijk[i][j][k] for k in Types] for j in Cols] for i in Rows])
 
-def updata_costs(costs, batch, x_edge, stair, p1 = 5, p2 = 1):
+def updata_costs(costs, batch, x_edge, stair, p1 = 3, p2 = 1):
     if stair == 0:
         bags = np.ceil(x_edge / batch)
         margin = x_edge - (bags - 1) * batch
@@ -141,8 +141,8 @@ def updata_costs(costs, batch, x_edge, stair, p1 = 5, p2 = 1):
         (1 - np.exp((batch - margin - p1) * top)))
     elif stair == 1:
         pen_edge = np.array(x_edge < p1).astype(int)
-        zo_edge = np.array(x_edge <= 1.1).astype(int)
-        costs_new = costs + costs / (x_edge + 0.001) * pen_edge
+        pen_dom = x_edge * (1 - pen_edge) + (x_edge * 0.1 + 0.001) * pen_edge
+        costs_new = costs / pen_dom
     return costs_new
 
 def iter_trans(costs, surp, lack, batch = 200, stair = 1):
@@ -152,13 +152,6 @@ def iter_trans(costs, surp, lack, batch = 200, stair = 1):
     # the solution of last iteration
     X_last = np.zeros((N,N,K))
     costs_update = costs
-    '''
-    res = muti_trans(costs_update, surp, lack)
-    X_last = res['var']
-    y_rand = np.sum(X_last, axis=2)
-    obj = np.sum(np.ceil(y_rand / batch) * costs)
-    print(obj)
-    '''
     obj_last = np.sum(costs)
 
     iter_num = 0
@@ -186,7 +179,57 @@ def iter_trans(costs, surp, lack, batch = 200, stair = 1):
         # update the costs of linear model
         costs_update = updata_costs(costs, batch, x_edge, stair)
     
-    return X_last
+    obj_best = obj
+    print('obj_best: ' + str(obj_best))
+    '''
+    iter_num = 0
+    alpha = 5
+    beta = 0.9
+    base_p = np.ones((N,N))
+    anni_prob = np.zeros((N,N))
+    anni_state = np.zeros((N,N))
+    anni_base = 0.1
+    gene_base = 0.1
+    while iter_num < 100:
+        rd_num = np.random.rand(N,N)
+        anni_state += np.array(anni_state < 0.5).astype(int) * np.array(
+            rd_num < anni_base * base_p
+        ).astype(int)
+        anni_state -= np.array(anni_state > 0.5).astype(int) * np.array(
+            rd_num < gene_base / (base_p + anni_prob)
+        ).astype(int)
+
+        costs_update = updata_costs(costs, batch, x_edge, stair)
+        costs_update = costs_update * (1 - anni_state) + anni_state * 1e8
+        
+        res = muti_trans(costs_update, surp, lack)
+        X = res['var']
+        x_edge = np.sum(X, axis=2)
+
+        obj = np.sum(np.array(x_edge > 0).astype(int) * costs)
+        bags = np.sum(np.array(x_edge > 0).astype(int))
+        print('obj:' + str(obj) + ", bags: " + str(bags) + ", average: "
+        + str(np.sum(x_edge) / bags))
+
+        if obj < obj_last:
+            anni_prob += anni_state * (obj_last - obj)
+            anni_prob -= (1 - anni_state) * anni_prob * (1 - beta)
+            if obj < obj_best:
+                base_p += anni_state
+                obj_best = obj
+                print('obj_best: ' + str(obj_best))
+        else:
+            anni_prob = anni_prob * beta
+        
+        obj_last = obj
+        iter_num += 1
+    '''
+    s2s_skc = np.sum(np.array(X > 0).astype(int), axis=1)
+    invalid_num = np.sum(np.array(s2s_skc > 2).astype(int))
+    print('invalid_num = ' + str(invalid_num) + ',  max_: ' + str(np.max(s2s_skc)))
+    small_bags = np.sum(np.array(x_edge < 3).astype(int) * np.array(x_edge > 0).astype(int))
+    print('small bag: ' + str(small_bags))
+    return X
 
 def intp_trans(costs, surp, lack, batch = 20):
     N = len(costs)
