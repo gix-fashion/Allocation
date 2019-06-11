@@ -97,6 +97,31 @@ def muti_trans(costs, surp, lack):
 
     return {'objective': obj, 'var': X}
 
+def muti_trans2(costs, costs_SKC, lack_SKC,
+    surp_SKC, type_SKC, LI_SKC, SI_SKC, N, K):
+    
+    X = np.zeros((N, N, K))
+    obj = 0
+    for i in range(len(costs_SKC)):
+        # costs of k type
+        costs_k = costs_SKC[i]
+        index_s = SI_SKC[i]
+        index_l = LI_SKC[i]
+        costs_n = costs[index_s, :]
+        costs_n = costs_n[:, index_l]
+        costs_k[0:len(index_s),0:len(index_l)] = costs_n
+
+        res = trans(costs_k, surp_SKC[i], lack_SKC[i])
+        x_k = np.array(res['var'])
+        x_k = x_k[0:len(index_s), 0:len(index_l)]
+        obj_k = res['objective']
+
+        for li in range(len(index_l)):
+            X[index_s, index_l[li], type_SKC[i]] = x_k[:, li]
+        if obj_k != None:
+            obj += obj_k
+
+    return {'objective': obj, 'var': X}
 
 def bag_trans(surp, lack, bags):
     N = len(surp)  # number of total area
@@ -159,10 +184,56 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
     costs_update = costs
     obj_last = np.sum(costs)
 
+    costs_SKC = []
+    lack_SKC = []
+    surp_SKC = []
+    type_SKC = []
+    LI_SKC = []
+    SI_SKC = []
+    for i in range(K):
+        # target nodes
+        l_k = lack[:, i]
+
+        # source nodes
+        s_k = surp[:, i]
+
+        T_s = np.sum(s_k) - np.sum(l_k)
+
+        index_l = np.where(l_k > 0)[0]
+        index_s = np.where(s_k > 0)[0]
+        if len(index_l) == 0 or len(index_s) == 0:
+            continue
+
+        type_SKC.append(i)
+        LI_SKC.append(index_l)
+        SI_SKC.append(index_s)
+        # costs of k type
+        costs_k = costs[index_s, :]
+        costs_k = costs_k[:, index_l]
+        costs_k = np.reshape(costs_k, (len(index_s), len(index_l)))
+        # lack of k type
+        lack_k = l_k[index_l]
+        surplus_K = s_k[index_s]
+
+        if T_s < 0:  # the surplus is less than lack
+            cost_add = np.zeros((1, len(index_l)))
+            costs_k = np.vstack((costs_k, cost_add))
+            surplus_K = np.hstack((surplus_K, -T_s))
+        elif T_s > 0:
+            cost_add = np.zeros((len(index_s), 1))
+            costs_k = np.hstack((costs_k, cost_add))
+            lack_k = np.hstack((lack_k, T_s))
+        
+        costs_SKC.append(costs_k)
+        lack_SKC.append(lack_k)
+        surp_SKC.append(surplus_K)
+    
     iter_num = 0
 
     while 1:
-        res = muti_trans(costs_update, surp, lack)
+        # res = muti_trans(costs_update, surp, lack)
+        res = muti_trans2(costs_update, costs_SKC, lack_SKC, surp_SKC,
+        type_SKC, LI_SKC, SI_SKC, N, K)
         X = res['var']
 
         # total traffic volume of all type of goods
@@ -190,7 +261,7 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
     iter_num = 0
     anni_state = np.zeros((N, N))
     while iter_num < 100:
-        costs_update = costs_update * np.array(x_edge > 0).astype(int)
+        costs_update = costs_update * np.array(x_edge > 0).astype(int) * (1 - anni_state)
         max_cost = np.max(costs_update)
         max_edge = np.where(costs_update == max_cost)
         anni_state[max_edge[0][0]][max_edge[1][0]] = 1
@@ -198,7 +269,9 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
         costs_update = updata_costs(costs, batch, x_edge, stair)
         costs_update = costs_update * (1 - anni_state)
 
-        res = muti_trans(costs_update, surp, lack)
+        # res = muti_trans(costs_update, surp, lack)
+        res = muti_trans2(costs_update, costs_SKC, lack_SKC, surp_SKC,
+        type_SKC, LI_SKC, SI_SKC, N, K)
         X = res['var']
         x_edge = np.sum(X, axis=2)
 
@@ -218,7 +291,7 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
     s2s_skc = np.sum(np.array(X > 0).astype(int), axis=1)
     invalid_num = np.sum(np.array(s2s_skc > 2).astype(int))
     print('invalid_num = ' + str(invalid_num) + ',  max_: ' + str(np.max(s2s_skc)))
-    small_bags = np.sum(np.array(x_edge < 3).astype(int) * np.array(x_edge > 0).astype(int))
+    small_bags = np.sum(np.array(x_edge < 2).astype(int) * np.array(x_edge > 0).astype(int))
     print('small bag: ' + str(small_bags))
     return X
 

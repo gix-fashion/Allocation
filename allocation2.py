@@ -17,11 +17,11 @@ def main(argv):
 
     # sale_pd, N * K, K is the number of cloth type
     data = pd.read_csv(argv[1], index_col=0)
-    surplus = data.values[:,0:300]
+    surplus = data.values
 
     # storage data, N * K
     data = pd.read_csv(argv[2], index_col=0)
-    lacks = data.values[:,0:300]
+    lacks = data.values
 
     sum_lack = np.sum(lacks, axis=1)
     print('total lack: ' + str(np.sum(sum_lack)) + ', ave_lack: ' + str(
