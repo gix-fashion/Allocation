@@ -466,9 +466,9 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
         costs_update = updata_costs(costs, batch, x_edge, stair)
         costs_update = costs_update * (1 - anni_state)
 
-        # res = Simplex_trans(costs_update, costs_SKC, As, bs, type_SKC, LI_SKC, SI_SKC, Bs, N, K)
+        res = Simplex_trans(costs_update, costs_SKC, As, bs, type_SKC, LI_SKC, SI_SKC, Bs, N, K)
 
-        res = muti_trans(costs_update, surp, lack)
+        # res = muti_trans(costs_update, surp, lack)
         # res = muti_trans2(costs_update, costs_SKC, lack_SKC, surp_SKC,
         # type_SKC, LI_SKC, SI_SKC, N, K)
         X = res['var']
