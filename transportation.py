@@ -1,8 +1,8 @@
+# -*- coding: utf-8 -*-
 from pulp import *
 import numpy as np
 import math
 import random
-
 
 def pairwise(iterable):
     '''
@@ -13,6 +13,118 @@ def pairwise(iterable):
     x = iter(iterable)
     return zip(x, x)
 
+class Simplex():
+
+    def __init__(self, A = [], b = [], c = [], B = []):
+        self._A = A # 系数矩阵
+        if np.min(A) < 0:
+            print('err in init')
+            print(A)
+            print('err' + i)
+        self._b = b #
+        self._c = c #
+        self._B = B #基变量的下标集合
+        self.row = len(b) #约束个数
+
+    def solve(self):
+        #假设线性规划形式是标准形式（都是等式）
+        A = self._A
+        b = self._b
+        c = self._c
+        B = self._B
+        (x, B, obj, A_new, b_new) = self.Simplex(A, b, c)
+
+        err = np.dot(self._A, x) - self._b
+        ccc = True
+        if np.sum(err * err) > 1e-6:
+            ccc = False
+
+        return (x, B, obj, ccc)
+
+    def setProblem(self, A, b, c):
+        self._A = A
+        self._b = b
+        self._c = c
+        self.row = len(b)
+    
+    def setBase(self, B):
+        self._B = B
+
+    #算法入口
+    def Simplex(self,A,b,c):
+        B = self._B
+        m_B = A[:,B]
+        A_op = np.zeros((self.row, len(c)))
+        for i in range(len(A[0])):
+            A_op[:,i] = np.linalg.solve(m_B, A[:,i])
+        b_op = np.linalg.solve(m_B, b) 
+
+        #函数目标值
+        obj = np.dot(c[B],b_op)
+
+        c = np.dot(c[B].reshape((1,-1)),A_op) - c
+        c = c[0]
+
+        # entering basis
+        e = np.argmax(c)
+        # 找到最大的检验数，如果大于0，则目标函数可以优化
+        while c[e] > 0:
+            theta = []
+            for i in range(len(b_op)):
+                if A_op[i][e] > 0:
+                    theta.append(b_op[i] / A_op[i][e])
+                else:
+                    theta.append(float("inf"))
+
+            l = np.argmin(np.array(theta))
+
+            if theta[l] == float('inf'):
+                print 'unbounded'
+                return False
+
+            (B, A_op, b_op, c, obj) = self._PIVOT(B, A_op, b_op, c, obj, l, e)
+
+            e = np.argmax(c)
+
+        x = self._CalculateX(B,A_op,b_op,c)
+        # err = np.dot(A[:,B], x[B]) - b
+
+        self._B = B
+        return (x, B, obj, A_op, b_op)
+
+    #得到完整解
+    def _CalculateX(self,B,A,b,c):
+
+        x = np.zeros(len(self._c),dtype=float)
+        x[B] = b
+        return x
+
+    # 基变换
+    def _PIVOT(self,B,A,b,c,z,l,e):
+        # main element is a_le
+        # l represents leaving basis
+        # e represents entering basis
+
+        main_elem = A[l][e]
+        #scaling the l-th line
+        A[l] = A[l]/main_elem
+        b[l] = b[l]/main_elem
+
+        #change e-th column to unit array
+        for i in range(self.row):
+            if i != l:
+                b[i] = b[i] - A[i][e] * b[l]
+                A[i] = A[i] - A[i][e] * A[l]
+
+        #update objective value
+        z -= b[l]*c[e]
+
+        c = c - c[e] * A[l]
+
+        # change the basis
+        B[l] = e
+
+        return (B, A, b, c, z)
 
 def trans(costs, x_max, y_max):
     row = len(costs)
@@ -38,7 +150,6 @@ def trans(costs, x_max, y_max):
     if LpStatus[prob.status] != 'Optimal':
         print("Status:", LpStatus[prob.status])
     return {'objective': value(prob.objective), 'var': [[value(vars[i][j]) for j in range(col)] for i in range(row)]}
-
 
 def muti_trans(costs, surp, lack):
     N = len(costs)  # number of total area
@@ -102,6 +213,7 @@ def muti_trans2(costs, costs_SKC, lack_SKC,
     
     X = np.zeros((N, N, K))
     obj = 0
+    x_SKC = []
     for i in range(len(costs_SKC)):
         # costs of k type
         costs_k = costs_SKC[i]
@@ -113,6 +225,7 @@ def muti_trans2(costs, costs_SKC, lack_SKC,
 
         res = trans(costs_k, surp_SKC[i], lack_SKC[i])
         x_k = np.array(res['var'])
+        x_SKC.append(x_k)
         x_k = x_k[0:len(index_s), 0:len(index_l)]
         obj_k = res['objective']
 
@@ -121,75 +234,54 @@ def muti_trans2(costs, costs_SKC, lack_SKC,
         if obj_k != None:
             obj += obj_k
 
-    return {'objective': obj, 'var': X}
+    return {'objective': obj, 'var': X, 'var_SKC': x_SKC}
 
-def bag_trans(surp, lack, bags):
-    N = len(surp)  # number of total area
-    K = len(surp[0])  # type number of total cloth
+def pretreat(costs_SKC, lack_SKC, surp_SKC, x_SKC):
+    As = []
+    bs = []
+    Bs = []
+    for i in range(len(costs_SKC)):
+        # costs of k type
+        costs_k = costs_SKC[i]
 
-    Rows = range(N)
-    Cols = range(N)
-    Types = range(K)
+        ns = len(costs_k)
+        nl = len(costs_k[0])
 
-    prob = LpProblem("Transportation Problem as 0-1", LpMinimize)
+        lp_A1 = np.repeat(np.eye(ns), nl, axis=1)
+        lp_A2 = np.tile(np.eye(nl), (1,ns))
+        lp_A = np.vstack((lp_A1, lp_A2))
+        lp_A = lp_A[0:(ns+nl-1),:] 
+        As.append(lp_A)
 
-    # trans_id = [[[(i,j,k) for k in range(K)] for j in range(N)] for i in range(N)]
-    X_ijk = LpVariable.dicts('trans', (Rows, Cols, Types),
-                             lowBound=0)
+        lp_b = np.hstack((surp_SKC[i],lack_SKC[i]))
+        bs.append(lp_b[0:(ns+nl-1)])
 
-    prob += X_ijk[0][0][0]
+        xi = x_SKC[i].reshape((1,-1))
+        lp_B = np.where(xi > 0)[1]
+        if len(lp_B) < ns + nl - 1:
+            rn = ns+nl-len(lp_B)-1
+            k = 0
+            lp_N = np.where(xi == 0)[1]
+            for mm in range(rn):
+                while 1:
+                    lp_B_test = np.hstack((lp_B, lp_N[k]))
+                    if np.linalg.matrix_rank(lp_A[:,lp_B_test]) == len(lp_B) + 1:
+                        lp_B = lp_B_test
+                        k += 1
+                        break
+                    k += 1
+        Bs.append(lp_B)
 
-    for k in Types:
-        for i in Rows:
-            prob += lpSum([X_ijk[i][j][k] for j in Cols]) <= surp[i][k]
+    return (As, bs, Bs)
 
-        for j in Cols:
-            prob += lpSum([X_ijk[i][j][k] for i in Rows]) == lack[j][k]
-
-    for i in Rows:
-        for j in Cols:
-            prob += lpSum([X_ijk[i][j][k] for k in Types]) <= bags[i][j]
-
-    prob.solve()
-
-    if LpStatus[prob.status] != 'Optimal':
-        # print("Status:", LpStatus[prob.status])
-        return (False, 0)
-    else:
-        # print("valid")
-        return (True, [[[X_ijk[i][j][k] for k in Types] for j in Cols] for i in Rows])
-
-
-def updata_costs(costs, batch, x_edge, stair, p1=3, p2=1):
-    if stair == 0:
-        bags = np.ceil(x_edge / batch)
-        margin = x_edge - (bags - 1) * batch
-        bottom = np.array(margin < p1).astype(int)
-        top = np.array(margin > batch - p1).astype(int)
-        costs_new = costs * ((1 - np.exp((margin - p1) * bottom)) +
-                             (1 - np.exp((batch - margin - p1) * top)))
-    elif stair == 1:
-        pen_edge = np.array(x_edge < p1).astype(int)
-        pen_dom = x_edge * (1 - pen_edge) + (x_edge * 0.1 + 0.001) * pen_edge
-        costs_new = costs / pen_dom
-    return costs_new
-
-
-def iter_trans(costs, surp, lack, batch=200, stair=1):
-    N = len(costs)  # number of total area
-    K = len(surp[0])  # type number of total cloth
-
-    # the solution of last iteration
-    X_last = np.zeros((N, N, K))
-    costs_update = costs
-    obj_last = np.sum(costs)
-
+def pretreat2(costs, surp, lack):
     costs_SKC = []
     lack_SKC = []
     surp_SKC = []
     type_SKC = []
     LI_SKC = []
     SI_SKC = []
+    K = len(surp[0])
     for i in range(K):
         # target nodes
         l_k = lack[:, i]
@@ -227,6 +319,108 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
         costs_SKC.append(costs_k)
         lack_SKC.append(lack_k)
         surp_SKC.append(surplus_K)
+    return (costs_SKC, lack_SKC, surp_SKC, type_SKC, LI_SKC, SI_SKC)
+
+def Simplex_trans(costs, costs_SKC, As, bs,
+    type_SKC, LI_SKC, SI_SKC, Bs, N, K):
+    
+    X = np.zeros((N, N, K))
+    obj = 0
+    for i in range(len(costs_SKC)):
+        # costs of k type
+        costs_k = costs_SKC[i]
+        index_s = SI_SKC[i]
+        index_l = LI_SKC[i]
+        costs_n = costs[index_s, :]
+        costs_n = costs_n[:, index_l]
+        costs_k[0:len(index_s),0:len(index_l)] = costs_n
+
+        ns = len(costs_k)
+        nl = len(costs_k[0])
+
+        lp_A = As[i]
+
+        lp_b = bs[i]
+
+        lp_c = costs_k.reshape((1,-1))
+        lp_c = lp_c[0]
+
+        lp_B = Bs[i]
+
+        S = Simplex(lp_A, lp_b, lp_c, lp_B)
+        (xi, lp_B, obj_k, ccc) = S.solve()
+        # Bs[i] = lp_B
+        
+        x_k = xi.reshape((ns,nl))
+        x_k = x_k[0:len(index_s), 0:len(index_l)]
+
+        for li in range(len(index_l)):
+            X[index_s, index_l[li], type_SKC[i]] = x_k[:, li]
+        if obj_k != None:
+            obj += obj_k
+
+    return {'objective': obj, 'var': X, 'var_Bs': Bs}
+
+def bag_trans(surp, lack, bags):
+    N = len(surp)  # number of total area
+    K = len(surp[0])  # type number of total cloth
+
+    Rows = range(N)
+    Cols = range(N)
+    Types = range(K)
+
+    prob = LpProblem("Transportation Problem as 0-1", LpMinimize)
+
+    # trans_id = [[[(i,j,k) for k in range(K)] for j in range(N)] for i in range(N)]
+    X_ijk = LpVariable.dicts('trans', (Rows, Cols, Types),
+                             lowBound=0)
+
+    prob += X_ijk[0][0][0]
+
+    for k in Types:
+        for i in Rows:
+            prob += lpSum([X_ijk[i][j][k] for j in Cols]) <= surp[i][k]
+
+        for j in Cols:
+            prob += lpSum([X_ijk[i][j][k] for i in Rows]) == lack[j][k]
+
+    for i in Rows:
+        for j in Cols:
+            prob += lpSum([X_ijk[i][j][k] for k in Types]) <= bags[i][j]
+
+    prob.solve()
+
+    if LpStatus[prob.status] != 'Optimal':
+        # print("Status:", LpStatus[prob.status])
+        return (False, 0)
+    else:
+        # print("valid")
+        return (True, [[[X_ijk[i][j][k] for k in Types] for j in Cols] for i in Rows])
+
+def updata_costs(costs, batch, x_edge, stair, p1=3, p2=1):
+    if stair == 0:
+        bags = np.ceil(x_edge / batch)
+        margin = x_edge - (bags - 1) * batch
+        bottom = np.array(margin < p1).astype(int)
+        top = np.array(margin > batch - p1).astype(int)
+        costs_new = costs * ((1 - np.exp((margin - p1) * bottom)) +
+                             (1 - np.exp((batch - margin - p1) * top)))
+    elif stair == 1:
+        pen_edge = np.array(x_edge < p1).astype(int)
+        pen_dom = x_edge * (1 - pen_edge) + (x_edge * 0.1 + 0.001) * pen_edge
+        costs_new = costs / pen_dom
+    return costs_new
+
+def iter_trans(costs, surp, lack, batch=200, stair=1):
+    N = len(costs)  # number of total area
+    K = len(surp[0])  # type number of total cloth
+
+    # the solution of last iteration
+    X_last = np.zeros((N, N, K))
+    costs_update = costs
+    obj_last = np.sum(costs)
+
+    (costs_SKC, lack_SKC, surp_SKC, type_SKC, LI_SKC, SI_SKC) = pretreat2(costs, surp, lack)
     
     iter_num = 0
 
@@ -260,6 +454,9 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
 
     iter_num = 0
     anni_state = np.zeros((N, N))
+    x_SKC = res['var_SKC']
+    (As, bs, Bs) = pretreat(costs_SKC, lack_SKC, surp_SKC, x_SKC)
+    
     while iter_num < 100:
         costs_update = costs_update * np.array(x_edge > 0).astype(int) * (1 - anni_state)
         max_cost = np.max(costs_update)
@@ -269,11 +466,14 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
         costs_update = updata_costs(costs, batch, x_edge, stair)
         costs_update = costs_update * (1 - anni_state)
 
-        # res = muti_trans(costs_update, surp, lack)
-        res = muti_trans2(costs_update, costs_SKC, lack_SKC, surp_SKC,
-        type_SKC, LI_SKC, SI_SKC, N, K)
+        # res = Simplex_trans(costs_update, costs_SKC, As, bs, type_SKC, LI_SKC, SI_SKC, Bs, N, K)
+
+        res = muti_trans(costs_update, surp, lack)
+        # res = muti_trans2(costs_update, costs_SKC, lack_SKC, surp_SKC,
+        # type_SKC, LI_SKC, SI_SKC, N, K)
         X = res['var']
         x_edge = np.sum(X, axis=2)
+        # Bs = res['var_Bs']
 
         obj = np.sum(np.array(x_edge > 0).astype(int) * costs)
         bags = np.sum(np.array(x_edge > 0).astype(int))
@@ -293,6 +493,7 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
     print('invalid_num = ' + str(invalid_num) + ',  max_: ' + str(np.max(s2s_skc)))
     small_bags = np.sum(np.array(x_edge < 2).astype(int) * np.array(x_edge > 0).astype(int))
     print('small bag: ' + str(small_bags))
+    
     return X
 
 
