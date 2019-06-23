@@ -3,6 +3,7 @@ from pulp import *
 import numpy as np
 import math
 import random
+import Queue
 
 def pairwise(iterable):
     '''
@@ -125,6 +126,268 @@ class Simplex():
         B[l] = e
 
         return (B, A, b, c, z)
+
+class TableWork():
+    def __init__(self, A = [], b = [], c = [], B = []):
+        self._A = A # 成本矩阵
+        self._b = b # 产量
+        self._c = c # 销量
+        self._B = B # 基变量
+        self._u = []
+        self._v = []
+        self.row = len(A)
+        self.column = len(A[0])
+
+    def initialize(self):
+        As = np.zeros((self.row, self.column))
+        bs = np.zeros((self.row,))
+        bs[:] = self._b
+        cs = np.zeros((self.column,))
+        cs[:] = self._c
+        self._B = np.zeros((self.row, self.column))
+        x = np.zeros((self.row, self.column))
+        while np.min(As) == 0:
+            min_c = np.argmin(self._A + As).astype(int)
+            new_B = [min_c / self.column, min_c % self.column]
+            self._B[new_B[0]][new_B[1]] = 1
+            if bs[new_B[0]] < cs[new_B[1]]:
+                As[new_B[0],:] = 1e6
+                cs[new_B[1]] -= bs[new_B[0]]
+                x[new_B[0]][new_B[1]] = bs[new_B[0]]
+                bs[new_B[0]] = 0
+                # print(str(new_B[0]) + ', ' + str(new_B[1]) + ', b')
+            elif bs[new_B[0]] > cs[new_B[1]]:
+                As[:,new_B[1]] = 1e6
+                bs[new_B[0]] -= cs[new_B[1]]
+                x[new_B[0]][new_B[1]] = cs[new_B[1]]
+                cs[new_B[1]] = 0
+                # print(str(new_B[0]) + ', ' + str(new_B[1]) + ', c')
+            
+            else:
+                x[new_B[0]][new_B[1]] = cs[new_B[1]]
+                cs[new_B[1]] = 0
+                bs[new_B[0]] = 0
+                sup_pos = np.where((1 - self._B[new_B[0],:]) * (1 - As[new_B[0],:]) == 1)[0]
+                if len(sup_pos) > 0:
+                    self._B[new_B[0]][sup_pos[0]] = 1
+                else:
+                    sup_pos = np.where((1 - self._B[:,new_B[1]]) * (1 - As[:,new_B[1]]) == 1)[0]
+                    if len(sup_pos) > 0:
+                        self._B[sup_pos[0]][new_B[1]] = 1
+                As[:,new_B[1]] = 1e6
+                As[new_B[0],:] = 1e6
+            
+        '''
+        new_B = [np.argmax(bs), np.argmax(cs)]
+        self._B[new_B[0]][new_B[1]] = 1
+        x[new_B[0]][new_B[1]] = cs[new_B[1]]
+        '''
+        return (x, bs, cs)
+    
+    def setBase(self, B):
+        self._B = B
+
+    def base2x(self):
+        bs = np.zeros((self.row,))
+        bs[:] = self._b
+        cs = np.zeros((self.column,))
+        cs[:] = self._c
+        x = np.zeros((self.row, self.column))
+        base_s = np.where(self._B == 1)
+        for i in range(len(base_s[0])):
+            pos = (base_s[0][i], base_s[1][i])
+            if bs[pos[0]] <= cs[pos[1]]:
+                x[pos[0]][pos[1]] = bs[pos[0]]
+                cs[pos[1]] -= bs[pos[0]]
+                bs[pos[0]] = 0
+            else:
+                bs[pos[0]] -= cs[pos[1]]
+                x[pos[0]][pos[1]] = cs[pos[1]]
+                cs[pos[1]] = 0
+                
+        return x
+
+    def testNumber(self):
+        W = np.zeros((self.row, self.column))
+        W[:,:] = self._A
+        B_c = np.zeros((self.row, self.column))
+
+        u = np.zeros((self.row,))
+        v = np.zeros((self.column))
+        q = Queue.Queue(self.row + self.column)
+        Base_in = np.where((self._B[0,:] == 1))[0]
+        for ib in Base_in:
+            if B_c[0][ib] == 0:
+                q.put((0, ib, 0))
+        
+        k = 0
+        while k < self.row + self.column - 1:
+            head = q.get()
+            if B_c[head[0]][head[1]] == 1:
+                continue
+            if head[2] == 0:
+                v[head[1]] = self._A[head[0]][head[1]] - u[head[0]]
+                W[:,head[1]] = W[:,head[1]] - v[head[1]]
+                B_c[head[0]][head[1]] = 1
+                in_Base = np.where((self._B[:,head[1]] == 1))[0]
+                for ib in in_Base:
+                    if B_c[ib][head[1]] == 0:
+                        q.put((ib, head[1], 1))
+                k = k + 1
+            else:
+                u[head[0]] = self._A[head[0]][head[1]] - v[head[1]]
+                W[head[0],:] = W[head[0],:] - u[head[0]]
+                B_c[head[0]][head[1]] = 1
+                in_Base = np.where((self._B[head[0],:] == 1))[0]
+                for ib in in_Base:
+                    if B_c[head[0]][ib] == 0:
+                        q.put((head[0], ib, 0))
+                k = k + 1
+        
+        self._u = u
+        self._v = v
+        
+        if np.max(np.fabs(np.repeat(u.reshape((self.row,1)), self.column, axis=1) + np.repeat(v.reshape((1,self.column)),
+        self.row, axis=0) + W - self._A)) > 1e-8:
+            print('testNum error')
+            print(np.max(np.fabs(np.repeat(u.reshape((self.row,1)), self.column, axis=1) + np.repeat(v.reshape((1,self.column)),
+            self.row, axis=0) + W - self._A)))
+            # print('1' + W)
+        
+        if np.sum(W * self._B) != 0:
+            print('testNum 0f base error')
+            # print('1' + W)
+        
+        return W
+
+    def adjust(self, pos, x):
+        stack = []
+        pos_ocp = np.ones((self.row, self.column))
+
+        dd = 0
+        cur_pos = pos
+        
+        # find cycle
+        while 1:
+            if dd == 0:
+                if self._B[cur_pos[0]][pos[1]] == 1:
+                    stack.append((cur_pos[0], pos[1], 0))
+                    break
+                nexts = np.where(self._B[cur_pos[0],:] == 1)[0]
+                for n in nexts:
+                    if pos_ocp[cur_pos[0]][n] == 0:
+                        continue
+                    if np.sum(self._B[:,n]) > 1:
+                        stack.append((cur_pos[0], n, dd))
+                        cur_pos = (cur_pos[0], n, dd)
+                        pos_ocp[cur_pos[0]][n] = 0
+                        dd = 1
+                        break
+                
+                if dd == 0:
+                    if len(stack) == 0:
+                        print('cannot find a cycle  ' + str(dd))
+                        print(pos)
+                        print(self._B)
+                        print(self._A)
+                        print(x)
+                        print('1' + x)
+                        return False
+                    stack.pop()
+                    cur_pos = stack[-1]
+                    dd = 1
+            else:
+                nexts = np.where(self._B[:, cur_pos[1]] == 1)[0]
+                for n in nexts:
+                    if pos_ocp[n][cur_pos[1]] == 0:
+                        continue
+                    if np.sum(self._B[n,:]) > 1:
+                        stack.append((n, cur_pos[1], dd))
+                        cur_pos = (n, cur_pos[1], dd)
+                        pos_ocp[n][cur_pos[1]] = 0
+                        dd = 0
+                        break
+                
+                if dd == 1:
+                    stack.pop()
+                    if len(stack) == 0:
+                        cur_pos = pos
+                    else:
+                        cur_pos = stack[-1]
+                    dd = 0
+            
+            # print(cur_pos)
+
+        theta = 1e8
+        # str_out = '(' + str(pos[0]) + ', ' + str(pos[1]) + ', ' + '0) '
+        for ps in stack:
+            # str_out += '(' + str(ps[0]) + ', ' + str(ps[1]) + ', ' + str(ps[2]) + ',' + str(
+            # x[ps[0]][ps[1]]) + ') '
+            if ps[2] == 0 and x[ps[0]][ps[1]] < theta:
+                theta = x[ps[0]][ps[1]]
+                out_base = (ps[0], ps[1])
+
+        x[pos[0]][pos[1]] = theta
+        # str2 = str(theta) + 'after: (' + str(pos[0]) + ', ' + str(pos[1]) + ', ' + str(
+        #     x[pos[0]][pos[1]]
+        # )
+        for ps in stack:
+            x[ps[0]][ps[1]] += theta * (ps[2] * 2 - 1)
+            # str2 += '(' + str(ps[0]) + ', ' + str(ps[1]) + ', ' + str(
+            #     x[ps[0]][ps[1]]
+            # )
+        
+        self._B[pos[0]][pos[1]] = 1
+        self._B[out_base[0]][out_base[1]] = 0
+
+        # print(str_out)
+        # print(str2)
+
+        return x
+
+    def solve(self, init_s = 1, x_init = []):
+        if init_s == 1:
+            (x, bs, cs) = self.initialize()
+        else:
+            x = x_init
+            
+        if np.sum(self._B) != self.row + self.column - 1 or np.min(np.sum(self._B,axis=0)
+        ) < 1 or np.min(np.sum(self._B,axis=1)) < 1:
+            print('base num: ' + str(np.sum(self._B)) + ', size:' + str(self.row)
+            + ', ' + str(self.column))
+            print(self._A)
+            print(self._B)
+            print(self._b)
+            print(self._c)
+            print(bs)
+            print(cs)
+            print(x)
+            print('1' + x)
+        
+        while 1:
+            W = self.testNumber()
+            # print('test')
+            min_w = np.argmin(W).astype(int)
+            pos = [min_w / self.column, min_w % self.column]
+            if W[pos[0]][pos[1]] >= 0:
+                break
+            
+            x = self.adjust(pos, x)
+            # print('adjust')
+
+        sum_raw = np.sum(x, axis=1)
+        sum_column = np.sum(x, axis=0)
+        if np.sum((sum_raw - self._b) ** 2) > 1e-8 or np.sum((sum_column - self._c) ** 2) > 1e-8:
+            # print(self._b)
+            # print(self._c)
+            # print(x)
+            print('constrait ee')
+            print('1' + x)
+
+        if np.min(x) < 0:
+            print('min x neg')
+            print('1' + x)
+        return (x, self._B)
 
 def trans(costs, x_max, y_max):
     row = len(costs)
@@ -451,7 +714,7 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
 
     obj_best = obj
     print('obj_best: ' + str(obj_best))
-
+    
     iter_num = 0
     anni_state = np.zeros((N, N))
     x_SKC = res['var_SKC']
@@ -496,6 +759,131 @@ def iter_trans(costs, surp, lack, batch=200, stair=1):
     
     return X
 
+def Table_trans(costs, costs_SKC, lack_SKC,
+    surp_SKC, type_SKC, LI_SKC, SI_SKC, Bs_last, x_last, N, K, setB=1):
+    X = np.zeros((N, N, K))
+    obj = 0
+    if setB == 0:
+        Bs_last = []
+        x_last = []
+    for i in range(len(costs_SKC)):
+    # for i in range(140):
+        # costs of k type
+        costs_k = costs_SKC[i]
+        index_s = SI_SKC[i]
+        index_l = LI_SKC[i]
+        costs_n = costs[index_s, :]
+        costs_n = costs_n[:, index_l]
+        costs_k[0:len(index_s),0:len(index_l)] = costs_n
+
+        Tw = TableWork(costs_k, surp_SKC[i], lack_SKC[i])
+        
+        if setB == 1:
+            Tw.setBase(Bs_last[i])
+            (x_k, B_k) = Tw.solve(init_s=0,x_init=x_last[i])
+            Bs_last[i] = B_k
+            x_last[i] = x_k
+            # Tw.setBase(Bs_last[0])
+            # (x_k, B_k) = Tw.solve(init_s=0,x_init=x_last[0])
+        else:
+            (x_k, B_k) = Tw.solve()
+            Bs_last.append(B_k)
+            x_last.append(x_k)
+
+        # print(str(i) + ', size: ' + str(len(index_s)) + '*' + str(len(index_l)))
+
+        # print('1' + x_k)
+
+        x_k = x_k[0:len(index_s), 0:len(index_l)]
+
+        for li in range(len(index_l)):
+            X[index_s, index_l[li], type_SKC[i]] = x_k[:, li]
+
+    return (X, Bs_last, x_last)
+
+def iter_table(costs, surp, lack):
+    N = len(costs)  # number of total area
+    K = len(surp[0])  # type number of total cloth
+
+    # the solution of last iteration
+    X_last = np.zeros((N, N, K))
+    costs_update = costs
+    obj_last = np.sum(costs)
+
+    (costs_SKC, lack_SKC, surp_SKC, type_SKC, LI_SKC, SI_SKC) = pretreat2(costs, surp, lack)
+    
+    iter_num = 0
+    setB = 0
+    Bs = []
+    x_SKC = []
+
+    while 1:
+        # res = muti_trans(costs_update, surp, lack)
+        (X, Bs, x_SKC) = Table_trans(costs_update, costs_SKC, lack_SKC, surp_SKC,
+        type_SKC, LI_SKC, SI_SKC, Bs, x_SKC, N, K, setB)
+
+        setB = 1
+
+        # total traffic volume of all type of goods
+        # in each edge
+        x_edge = np.sum(X, axis=2)
+        obj = np.sum(np.array(x_edge > 0).astype(int) * costs)
+        bags = np.sum(np.array(x_edge > 0).astype(int))
+        print('obj:' + str(obj) + ", bags: " + str(bags) + ", average: "
+              + str(np.sum(x_edge) / bags))
+
+        if abs(obj - obj_last) < 0.0001 or iter_num > 100:
+            print(obj - obj_last)
+            break
+
+        obj_last = obj
+        X_last = X
+        iter_num = iter_num + 1
+
+        # update the costs of linear model
+        costs_update = updata_costs(costs, 200, x_edge, 1)
+
+    obj_best = obj
+    print('obj_best: ' + str(obj_best))
+    
+    iter_num = 0
+    anni_state = np.zeros((N, N))
+    
+    while iter_num < 100:
+        costs_update = costs_update * np.array(x_edge > 0).astype(int) * (1 - anni_state)
+        max_cost = np.max(costs_update)
+        max_edge = np.where(costs_update == max_cost)
+        anni_state[max_edge[0][0]][max_edge[1][0]] = 1
+
+        costs_update = updata_costs(costs, 200, x_edge, 1)
+        costs_update = costs_update * (1 - anni_state)
+
+        (X, Bs, x_SKC) = Table_trans(costs_update, costs_SKC, lack_SKC, surp_SKC,
+        type_SKC, LI_SKC, SI_SKC, Bs, x_SKC, N, K, setB)
+        
+        x_edge = np.sum(X, axis=2)
+        # Bs = res['var_Bs']
+
+        obj = np.sum(np.array(x_edge > 0).astype(int) * costs)
+        bags = np.sum(np.array(x_edge > 0).astype(int))
+        print('obj:' + str(obj) + ", bags: " + str(bags) + ", average: "
+              + str(np.sum(x_edge) / bags))
+
+        if obj < obj_best:
+            obj_best = obj
+            print('obj_best: ' + str(obj_best))
+
+        iter_num += 1
+        if np.sum(np.array(x_edge > 0).astype(int) * (1 - anni_state)) == 0:
+            break
+
+    s2s_skc = np.sum(np.array(X > 0).astype(int), axis=1)
+    invalid_num = np.sum(np.array(s2s_skc > 2).astype(int))
+    print('invalid_num = ' + str(invalid_num) + ',  max_: ' + str(np.max(s2s_skc)))
+    small_bags = np.sum(np.array(x_edge < 2).astype(int) * np.array(x_edge > 0).astype(int))
+    print('small bag: ' + str(small_bags))
+    
+    return X
 
 def IL_trans(costs, surp, lack, batch=20):
     N = len(costs)  # number of total area
