@@ -17,11 +17,11 @@ def main(argv):
 
     # sale_pd, N * K, K is the number of cloth type
     data = pd.read_csv(argv[1], index_col=0)
-    surplus = data.values[0:100]
+    surplus = data.values[:,0:1600]
 
     # storage data, N * K
     data = pd.read_csv(argv[2], index_col=0)
-    lacks = data.values[0:100]
+    lacks = data.values[:,0:1600]
 
     sum_lack = np.sum(lacks, axis=1)
     print('total lack: ' + str(np.sum(sum_lack)) + ', ave_lack: ' + str(
@@ -36,7 +36,7 @@ def main(argv):
     if argv[5] == '0':
         result = tp.iter_trans(costs, surplus, lacks, batch = 200)
     elif argv[5] == '1':
-        result = tp.intp_trans(costs, surplus, lacks, batch = 200)
+        result = tp.iter_table(costs, surplus, lacks)
     elif argv[5] == '2':
         result = tp.PSO_trans(costs, surplus, lacks, batch = 200)
     elif argv[5] == '3':

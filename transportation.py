@@ -274,15 +274,25 @@ class TableWork():
                     stack.append((cur_pos[0], pos[1], 0))
                     break
                 nexts = np.where(self._B[cur_pos[0],:] == 1)[0]
+                pp_n = []
                 for n in nexts:
                     if pos_ocp[cur_pos[0]][n] == 0:
                         continue
                     if np.sum(self._B[:,n]) > 1:
-                        stack.append((cur_pos[0], n, dd))
-                        cur_pos = (cur_pos[0], n, dd)
-                        pos_ocp[cur_pos[0]][n] = 0
+                        pp_n.append((cur_pos[0], n, dd))
+                        if x[cur_pos[0]][n] > 0:
+                            stack.append((cur_pos[0], n, dd))
+                            cur_pos = (cur_pos[0], n, dd)
+                            pos_ocp[cur_pos[0]][n] = 0
+                            dd = 1
+                            break
+                if dd == 0:
+                    if len(pp_n) > 0:
+                        rn = random.randint(0, len(pp_n) - 1)
+                        stack.append(pp_n[rn])
+                        cur_pos = pp_n[rn]
+                        pos_ocp[cur_pos[0]][cur_pos[1]] = 0
                         dd = 1
-                        break
                 
                 if dd == 0:
                     if len(stack) == 0:
@@ -323,9 +333,13 @@ class TableWork():
         for ps in stack:
             # str_out += '(' + str(ps[0]) + ', ' + str(ps[1]) + ', ' + str(ps[2]) + ',' + str(
             # x[ps[0]][ps[1]]) + ') '
-            if ps[2] == 0 and x[ps[0]][ps[1]] < theta:
-                theta = x[ps[0]][ps[1]]
-                out_base = (ps[0], ps[1])
+            if ps[2] == 0:
+                if x[ps[0]][ps[1]] < theta:
+                    theta = x[ps[0]][ps[1]]
+                    out_base = (ps[0], ps[1])
+                elif x[ps[0]][ps[1]] == theta:
+                    if random.random() > 0.5:
+                        out_base = (ps[0], ps[1])
 
         x[pos[0]][pos[1]] = theta
         # str2 = str(theta) + 'after: (' + str(pos[0]) + ', ' + str(pos[1]) + ', ' + str(
@@ -369,7 +383,8 @@ class TableWork():
             # print('test')
             min_w = np.argmin(W).astype(int)
             pos = [min_w / self.column, min_w % self.column]
-            if W[pos[0]][pos[1]] >= 0:
+            # print(W[pos[0]][pos[1]])
+            if W[pos[0]][pos[1]] > -1e-10:
                 break
             
             x = self.adjust(pos, x)
@@ -767,7 +782,7 @@ def Table_trans(costs, costs_SKC, lack_SKC,
         Bs_last = []
         x_last = []
     for i in range(len(costs_SKC)):
-    # for i in range(140):
+    # for i in [73]:
         # costs of k type
         costs_k = costs_SKC[i]
         index_s = SI_SKC[i]
@@ -789,7 +804,7 @@ def Table_trans(costs, costs_SKC, lack_SKC,
             (x_k, B_k) = Tw.solve()
             Bs_last.append(B_k)
             x_last.append(x_k)
-
+        
         # print(str(i) + ', size: ' + str(len(index_s)) + '*' + str(len(index_l)))
 
         # print('1' + x_k)
