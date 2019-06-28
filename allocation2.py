@@ -65,19 +65,33 @@ def main(argv):
                 result[i,sss[1],:] = 0  
                 if sum_s < max_surp[i]:
                     break 
+    '''
 
     # output the result as file
     index = np.array([i for i in range(N)]) + 1
     x_id = np.repeat(index.reshape((N,1)), N, axis = 1)
     y_id = np.repeat(index.reshape((1,N)), N, axis = 0)
 
-    result_x = np.hstack((x_id.reshape((N*N,1)),y_id.reshape((N*N,1))))
-    for i in range(K):
-        result_x = np.hstack((result_x, result[:,:,i].reshape(N*N,1)))
+    x_edge = np.sum(result, axis=2)
+    eff_edge = np.where(x_edge >= 3)
+    eff_num = len(eff_edge[0])
+    print('effictive edge number: ' + str(eff_num))
 
+    result_x = np.zeros((eff_num, K + 2))
+    for i in range(eff_num):
+        result_x[i][0] = x_id[eff_edge[0][i]][eff_edge[1][i]]
+        result_x[i][1] = y_id[eff_edge[0][i]][eff_edge[1][i]]
+        result_x[i,2:] = result[eff_edge[0][i], eff_edge[1][i], :]
+    '''
+    result_x = np.zeros((N * N, K + 2))
+    result_x[:,0] = x_id.reshape((N*N,))
+    result_x[:,1] = y_id.reshape((N*N,))
+
+    for i in range(K):
+        result_x[:,2 + i] = result[:,:,i].reshape((N*N,))
+    '''
     data_out = pd.DataFrame(result_x)
     data_out.to_csv(sys.argv[4],index=False)
-    '''
 
 if __name__=="__main__":
     main(sys.argv)
