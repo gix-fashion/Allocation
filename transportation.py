@@ -816,7 +816,7 @@ def Table_trans(costs, costs_SKC, lack_SKC,
 
     return (X, Bs_last, x_last)
 
-def iter_table(costs, surp, lack):
+def iter_table(costs, surp, lack, max_iter=100):
     N = len(costs)  # number of total area
     K = len(surp[0])  # type number of total cloth
 
@@ -864,7 +864,7 @@ def iter_table(costs, surp, lack):
     iter_num = 0
     anni_state = np.zeros((N, N))
     
-    while iter_num < 100:
+    while iter_num < max_iter:
         costs_update = costs_update * np.array(x_edge > 0).astype(int) * (1 - anni_state)
         max_cost = np.max(costs_update)
         max_edge = np.where(costs_update == max_cost)

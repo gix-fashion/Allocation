@@ -8,7 +8,7 @@ import numpy as np
 def main(argv):
     # sys.argv: 1, surplus 2, lack 3, costs 
     # 4, output file name; 5, solve method; 
-    # 6, max surplus 
+    # 6, max iter_num
     
     # costs matrix, N * N, N is the number of nodes 
     # including sale nodes and warehouse nodes
@@ -17,11 +17,11 @@ def main(argv):
 
     # sale_pd, N * K, K is the number of cloth type
     data = pd.read_csv(argv[1], index_col=0)
-    surplus = data.values[:,0:1600]
+    surplus = data.values[:,0:100]
 
     # storage data, N * K
     data = pd.read_csv(argv[2], index_col=0)
-    lacks = data.values[:,0:1600]
+    lacks = data.values[:,0:100]
 
     sum_lack = np.sum(lacks, axis=1)
     print('total lack: ' + str(np.sum(sum_lack)) + ', ave_lack: ' + str(
@@ -33,18 +33,20 @@ def main(argv):
         np.sum(sum_surplus) / np.sum(np.array(sum_surplus > 0).astype(int))
     ))
 
+    print(argv[6])
+
     if argv[5] == '0':
         result = tp.iter_trans(costs, surplus, lacks, batch = 200)
     elif argv[5] == '1':
-        result = tp.iter_table(costs, surplus, lacks)
+        result = tp.iter_table(costs, surplus, lacks, int(argv[6]))
     elif argv[5] == '2':
         result = tp.PSO_trans(costs, surplus, lacks, batch = 200)
     elif argv[5] == '3':
         result = tp.GA_trans(costs, surplus, lacks, batch = 200)
-    '''
+    
     N = len(surplus)
     K = len(surplus[0])
-
+    '''
     # remove the small bags and consider the max surplus constraits
     data = pd.read_csv(argv[6], index_col=0)
     max_surp = data.values
@@ -66,7 +68,6 @@ def main(argv):
                 if sum_s < max_surp[i]:
                     break 
     '''
-
     # output the result as file
     index = np.array([i for i in range(N)]) + 1
     x_id = np.repeat(index.reshape((N,1)), N, axis = 1)
